@@ -17,13 +17,9 @@ limitations under the License.
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
@@ -89,13 +85,12 @@ func checkPermission(stub shim.ChaincodeStubInterface, permission string) bool {
 // remove - takes one argument, a key, and removes if from the state
 func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 
-	collection := "topSecret"
-
 	fmt.Printf("Invoking\n")
 	function, args := stub.GetFunctionAndParameters()
 	fmt.Printf("Invoking chaincode with command %s\n", function)
 	switch function {
-	case "put":
+
+	case "putPrivate":
 		if !checkPermission(stub, "write") {
 			fmt.Printf("Forbidden")
 			return shim.Error(fmt.Sprintf("Forbidden"))
@@ -120,101 +115,9 @@ func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 			return shim.Error(fmt.Sprintf("put operation failed. Error updating state: %s", err))
 		}
 
-		indexName := "compositeKeyTest"
-		compositeKeyTestIndex, err := stub.CreateCompositeKey(indexName, []string{key})
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
-		valueByte := []byte{0x00}
-		if err := stub.PutState(compositeKeyTestIndex, valueByte); err != nil {
-			fmt.Printf("Error putting state with compositeKey %s", err)
-			return shim.Error(fmt.Sprintf("put operation failed. Error updating state with compositeKey: %s", err))
-		}
-
-		message := new(Message)
-		message.Payload = "NEW STATE"
-
-		messageBytes, err := proto.Marshal(message)
-
-		if err != nil {
-			return shim.Error(fmt.Sprintf("Failed to create protobuf: %s", err))
-		}
-
-		if err := stub.SetEvent(key, messageBytes); err != nil {
-			return shim.Error(fmt.Sprintf("put operation failed. Error emiting state update event with compositeKey: %s", err))
-		}
-
 		return shim.Success(nil)
 
-	case "putPrivate":
-		if !checkPermission(stub, "write") {
-			fmt.Printf("Forbidden")
-			return shim.Error(fmt.Sprintf("Forbidden"))
-		}
-
-		transientMap, err := stub.GetTransient()
-		if err != nil {
-			fmt.Printf("Error getting transient map:  %s", err)
-			return shim.Error(fmt.Sprintf("put operation failed. Error getting transient map: %s", err))
-		}
-		keyBytes, found := transientMap["key"]
-		if !found {
-			return shim.Error("putPrivate operation must have key")
-		}
-
-		key := string(keyBytes)
-
-		value, found := transientMap["value"]
-		if !found {
-			return shim.Error("putPrivate operation must have value")
-		}
-
-		// Check current value
-		currentValue, err := stub.GetPrivateData(collection, key)
-		if err != nil {
-			fmt.Printf("Error putting state %s", err)
-			return shim.Error(fmt.Sprintf("put operation failed. Error updating state: %s", err))
-		}
-		fmt.Printf("Current value len: %d", len(currentValue))
-
-		if err := stub.PutPrivateData(collection, key, value); err != nil {
-			fmt.Printf("Error putting state %s", err)
-			return shim.Error(fmt.Sprintf("put operation failed. Error updating state: %s", err))
-		}
-
-		indexName := "compositeKeyTest"
-		compositeKeyTestIndex, err := stub.CreateCompositeKey(indexName, []string{key})
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-
-		valueByte := []byte{0x00}
-		if err := stub.PutPrivateData(collection, compositeKeyTestIndex, valueByte); err != nil {
-			fmt.Printf("Error putting state with compositeKey %s", err)
-			return shim.Error(fmt.Sprintf("put operation failed. Error updating state with compositeKey: %s", err))
-		}
-
-		return shim.Success(nil)
-
-	case "remove":
-		if !checkPermission(stub, "write") {
-			fmt.Printf("Forbidden")
-			return shim.Error(fmt.Sprintf("Forbidden"))
-		}
-
-		if len(args) < 1 {
-			return shim.Error("remove operation must include one argument, a key")
-		}
-		key := args[0]
-
-		err := stub.DelState(key)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("remove operation failed. Error updating state: %s", err))
-		}
-		return shim.Success(nil)
-
-	case "get":
+	case "getPrivate":
 		if !checkPermission(stub, "read") {
 			fmt.Printf("Forbidden")
 			return shim.Error(fmt.Sprintf("Forbidden"))
@@ -230,206 +133,6 @@ func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 			return shim.Error(fmt.Sprintf("get operation failed. Error accessing state: %s", err))
 		}
 		return shim.Success(value)
-
-	case "getPrivate":
-		if !checkPermission(stub, "read") {
-			fmt.Printf("Forbidden")
-			return shim.Error(fmt.Sprintf("Forbidden"))
-		}
-
-		transientMap, err := stub.GetTransient()
-		if err != nil {
-			fmt.Printf("Error getting transient map:  %s", err)
-			return shim.Error(fmt.Sprintf("put operation failed. Error getting transient map: %s", err))
-		}
-		keyBytes, found := transientMap["key"]
-		if !found {
-			return shim.Error("putPrivate operation must have key")
-		}
-
-		key := string(keyBytes)
-
-		value, err := stub.GetPrivateData(collection, key)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("get operation failed. Error accessing state: %s", err))
-		}
-		return shim.Success(value)
-
-	case "custom_history":
-		if !checkPermission(stub, "read") {
-			fmt.Printf("Forbidden")
-			return shim.Error(fmt.Sprintf("Forbidden"))
-		}
-
-		if len(args) < 1 {
-			return shim.Error("history operation must include one argument, a key")
-		}
-
-		key := args[0]
-
-		fmt.Printf("- start getHistoryForMarble: %s\n", key)
-
-		resultsIterator, err := stub.GetHistoryForKey(key)
-		if err != nil {
-			return shim.Error(err.Error())
-		}
-		defer resultsIterator.Close()
-
-		var buffer bytes.Buffer
-		buffer.WriteString("[")
-
-		bArrayMemberAlreadyWritten := false
-		for resultsIterator.HasNext() {
-			response, err := resultsIterator.Next()
-			if err != nil {
-				return shim.Error(err.Error())
-			}
-
-			if bArrayMemberAlreadyWritten == true {
-				buffer.WriteString(",")
-			}
-			buffer.WriteString("{\"TxId\":")
-			buffer.WriteString("\"")
-			buffer.WriteString(response.TxId)
-			buffer.WriteString("\"")
-
-			buffer.WriteString(", \"Value\":")
-			// if it was a delete operation on given key, then we need to set the
-			//corresponding value null. Else, we will write the response.Value
-			//as-is (as the Value itself a JSON marble)
-			if response.IsDelete {
-				buffer.WriteString("null")
-			} else {
-				buffer.WriteString(string(response.Value))
-			}
-
-			buffer.WriteString(", \"Timestamp\":")
-			buffer.WriteString("\"")
-			buffer.WriteString(time.Unix(response.Timestamp.Seconds, int64(response.Timestamp.Nanos)).String())
-			buffer.WriteString("\"")
-
-			buffer.WriteString(", \"IsDelete\":")
-			buffer.WriteString("\"")
-			buffer.WriteString(strconv.FormatBool(response.IsDelete))
-			buffer.WriteString("\"")
-
-			buffer.WriteString("}")
-			bArrayMemberAlreadyWritten = true
-		}
-		buffer.WriteString("]")
-
-		fmt.Printf("- history returning:\n%s\n", buffer.String())
-
-		return shim.Success(buffer.Bytes())
-
-	case "keys":
-		if !checkPermission(stub, "read") {
-			fmt.Printf("Forbidden")
-			return shim.Error(fmt.Sprintf("Forbidden"))
-		}
-
-		if len(args) < 2 {
-			return shim.Error("put operation must include two arguments, a key and value")
-		}
-		startKey := args[0]
-		endKey := args[1]
-
-		//sleep needed to test peer's timeout behavior when using iterators
-		stime := 0
-		if len(args) > 2 {
-			stime, _ = strconv.Atoi(args[2])
-		}
-
-		keysIter, err := stub.GetStateByRange(startKey, endKey)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("keys operation failed. Error accessing state: %s", err))
-		}
-		defer keysIter.Close()
-
-		var keys []string
-		for keysIter.HasNext() {
-			//if sleeptime is specied, take a nap
-			if stime > 0 {
-				time.Sleep(time.Duration(stime) * time.Millisecond)
-			}
-
-			response, iterErr := keysIter.Next()
-			if iterErr != nil {
-				return shim.Error(fmt.Sprintf("keys operation failed. Error accessing state: %s", err))
-			}
-			keys = append(keys, response.Key)
-		}
-
-		for key, value := range keys {
-			fmt.Printf("key %d contains %s\n", key, value)
-		}
-
-		jsonKeys, err := json.Marshal(keys)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("keys operation failed. Error marshaling JSON: %s", err))
-		}
-
-		return shim.Success(jsonKeys)
-	case "query":
-		if !checkPermission(stub, "read") {
-			fmt.Printf("Forbidden")
-			return shim.Error(fmt.Sprintf("Forbidden"))
-		}
-
-		query := args[0]
-		keysIter, err := stub.GetQueryResult(query)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("query operation failed. Error accessing state: %s", err))
-		}
-		defer keysIter.Close()
-
-		var keys []string
-		for keysIter.HasNext() {
-			response, iterErr := keysIter.Next()
-			if iterErr != nil {
-				return shim.Error(fmt.Sprintf("query operation failed. Error accessing state: %s", err))
-			}
-			keys = append(keys, response.Key)
-		}
-
-		jsonKeys, err := json.Marshal(keys)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("query operation failed. Error marshaling JSON: %s", err))
-		}
-
-		return shim.Success(jsonKeys)
-	case "history":
-		if !checkPermission(stub, "read") {
-			fmt.Printf("Forbidden")
-			return shim.Error(fmt.Sprintf("Forbidden"))
-		}
-
-		key := args[0]
-		keysIter, err := stub.GetHistoryForKey(key)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("query operation failed. Error accessing state: %s", err))
-		}
-		defer keysIter.Close()
-
-		var keys []string
-		for keysIter.HasNext() {
-			response, iterErr := keysIter.Next()
-			if iterErr != nil {
-				return shim.Error(fmt.Sprintf("query operation failed. Error accessing state: %s", err))
-			}
-			keys = append(keys, response.TxId)
-		}
-
-		for key, txID := range keys {
-			fmt.Printf("key %d contains %s\n", key, txID)
-		}
-
-		jsonKeys, err := json.Marshal(keys)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("query operation failed. Error marshaling JSON: %s", err))
-		}
-
-		return shim.Success(jsonKeys)
 
 	case "permissionRequest":
 
@@ -454,35 +157,6 @@ func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 		if err := stub.PutState(key, value); err != nil {
 			fmt.Printf("Error putting state %s", err)
 			return shim.Error(fmt.Sprintf("put operation failed. Error updating state: %s", err))
-		}
-
-		return shim.Success(nil)
-
-	case "dropLastGrantedPermission":
-		if !checkPermission(stub, "admin") {
-			fmt.Printf("Forbidden")
-			return shim.Error(fmt.Sprintf("Forbidden"))
-		}
-
-		key := "lastGrantedUser"
-
-		userCert, err := stub.GetState(key)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("get permission request operation failed. Error accessing state: %s", err))
-		}
-		if userCert == nil {
-			return shim.Error(fmt.Sprintf("no rights was granted. Error accessing state: %s", err))
-		}
-
-		err = stub.DelState(key)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("remove last granted record failed. Error updating state: %s", err))
-		}
-
-		key = string(userCert[:])
-		err = stub.DelState(key)
-		if err != nil {
-			return shim.Error(fmt.Sprintf("remove user rights failed. Error updating state: %s", err))
 		}
 
 		return shim.Success(nil)

@@ -54,7 +54,6 @@ chaincodes:
       version: v1
       type: GO_LANG
       endorsementPolicy: chaincodeendorsementpolicy.yaml
-      collectionPolicy: private_data_config.yaml
       initArguments:
         - blabla
         - blabla
